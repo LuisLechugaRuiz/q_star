@@ -29,12 +29,16 @@ def load_prompt(template: str, **kwargs) -> str:
         raise
 
 
-@retry(wait=wait_random_exponential(min=1, max=40), stop=stop_after_attempt(3))
-def get_response(model: str, system: str, user: str, temperature: float = 0.7, n: int = 1) -> str:
-    messages = [
+def fill_messages(system: str, user: str):
+    return [
         {"role": "user", "content": user},
         {"role": "system", "content": system}
     ]
+
+
+@retry(wait=wait_random_exponential(min=1, max=40), stop=stop_after_attempt(3))
+def get_response(model: str, system: str, user: str, temperature: float = 0.7, n: int = 1) -> str:
+    messages = fill_messages(system, user)
     args = {
         "model": model,
         "messages": messages,

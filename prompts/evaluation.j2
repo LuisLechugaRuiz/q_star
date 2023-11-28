@@ -1,8 +1,13 @@
-Evaluate the effectiveness of the following reasoning trace in solving the given task. 
-Provide a score between {{ min_value }} and {{ max_value }}, where {{ min_value }} is the least effective and {{ max_value }} is the most effective.
+Evaluate the effectiveness of the new step to complete the history and achieve the task.
+Provide a score between {{ min_score }} and {{ max_score }}, where {{ min_score }} is the least effective and {{ max_score }} is the most effective.
+
+In case the step completes the task the score should be -1.
 
 Task:
 {{ task }}
 
-Reasoning Trace:
-{{ reasoning_trace }}
+History:
+{{ history }}
+
+Step:
+{{ step }}
