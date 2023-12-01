@@ -1,4 +1,4 @@
-from utils.llm_call import load_prompt, get_response, fill_messages
+from q_star.utils.llm_call import load_prompt, get_response, fill_messages
 
 
 def fill_evaluation_prompt(task, history, new_step, min_score, max_score):
@@ -35,7 +35,7 @@ def generate_evaluation(task, history, new_step, min_score=0.0, max_score=1.0):
     """
     system, user = fill_evaluation_prompt(task, history, new_step, min_score, max_score)
 
-    response = get_response("gpt-4-turbo", system, user)
+    response = get_response(system, user)
     evaluation = response["choices"][0]["message"]["content"]
 
     return evaluation

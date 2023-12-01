@@ -1,14 +1,17 @@
 from enum import IntEnum
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
+import re
 
-from .policy import (
+from q_star.algorithm.policy import (
     generate_policy_steps,
     fill_policy_training_data,
-)  # TODO: Relative to package.
-from .evaluator import (
+)
+from q_star.algorithm.evaluator import (
     generate_evaluation,
     fill_evaluation_training_data,
-)  # TODO: Relative to package.
+)
+
+import q_star.utils.grading.grader as grader
 
 
 class Result(IntEnum):
@@ -22,19 +25,24 @@ class QStarNode:
     A class to represent a node in the Q* search algorithm.
     """
 
-    def __init__(self, id: int, state=None, parent=None, score=0.0):
+    def __init__(self, uid: int, state=None, parent=None, score=0.0, depth=0):
         """
         Initialize a new Q* node.
 
-        :param id: The ID of the node.
+        :param uid: The UID of the node.
         :param state: The state represented by this node.
         :param parent: The parent node of this node.
         :param score: The score of this node, representing its effectiveness or success probability.
         """
-        self.id = id
+        self.uid = uid
         self.state = state
         self.parent = parent
         self.score = score
+        self.accumulated_score = score + parent.accumulated_score if parent else score
+        self.depth = depth
+
+    def get_score(self, depth_penalty):
+        return self.accumulated_score - depth_penalty * self.depth
 
     def get_path(self) -> List["QStarNode"]:
         """
@@ -42,23 +50,24 @@ class QStarNode:
         """
         node, p = self, []
         while node:
-            p.append(node.state)
+            p.append(node)
             node = node.parent
-        return p[::-1]  # Return reversed path
+        reversed_path = p[::-1]
+        reversed_path.pop(0)  # Remove the root node
+        return reversed_path
 
     def get_history(self, add_current_state=True):
         """
         Get the history of the node, accumulating the states from the root node to this node using natural language.
         """
         path = self.get_path()
-        path.pop(0)  # Remove the root node
 
-        if not add_current_state:
+        if len(path) > 0 and not add_current_state:
             path.pop(-1)  # Remove the current state
 
         history = ""
-        for index, state in enumerate(path):
-            history += f"- {index}: {state}\n"
+        for index, node in enumerate(path):
+            history += f"- {index}: {node.state}\n"
         return history
 
     def update(self, new_score, learning_rate):
@@ -77,8 +86,10 @@ class QStarAlgorithm:
     def __init__(
         self,
         task_description: str,
-        new_branches=5,
+        solution: Optional[str] = None,
+        new_branches=2,
         learning_rate=0.1,
+        depth_penalty=0.05,
     ):
         """
         Initialize the Q* algorithm.
@@ -88,30 +99,25 @@ class QStarAlgorithm:
         :param learning_rate: The learning rate to use when updating the score of the nodes.
         """
         self.task_description = task_description
+        self.solution = solution
         self.new_branches = new_branches
         self.learning_rate = learning_rate
+        self.depth_penalty = depth_penalty
 
-        self.node_counter = 0  # Counter to assign an ID to each node.
-        self.branches: List[QStarNode] = [QStarNode(None, None, 0)]  # Initial state with empty history.
-        self.solutions: List[
-            (str, str)
-        ] = (
-            []
-        )  # Natural language solutions -> Should have format: input ("Task + History") -> output ("Reasoning Trace")
-        # TODO: Maybe we should save only the fastest solution?
-        self.updated_scores: Dict[
-            (int, (str, float))
-        ] = (
-            []
-        )  # Updated scores. Should be a dict as we need to update node on each propagation.
+        self.node_counter = 0
+        self.depth = 0
+        self.branches: List[QStarNode] = [
+            QStarNode(self.node_counter, None, None, 0, 0)
+        ]  # Initial state with empty history.
+
+        self.solutions: List[Tuple[str, str]] = []
+        self.updated_scores: Dict[int, Tuple[str, float]] = {}
 
     def sort_branches(self):
         """
-        Sort the branches by score.
+        Sort the branches by score, and in case of a tie, by depth.
         """
-        self.branches.sort(
-            key=lambda n: n.score, reverse=True
-        )
+        self.branches.sort(key=lambda n: (n.get_score(self.depth_penalty), n.depth), reverse=True)
 
     def run(self) -> (str, Result):
         """
@@ -122,23 +128,34 @@ class QStarAlgorithm:
         current_node = self.branches.pop(0)  # Node with the highest score
         history = current_node.get_history()
         result = Result.IN_PROGRESS
+        answer = None
 
         # Generate successors and evaluate them
         for successor in self.get_successors(history):
-            evaluation = self.evaluate_state(successor)
+            evaluation = self.evaluate_state(history, successor)
+            if evaluation is None:
+                evaluation = 0.0  # Error extracting evaluation from model response...
 
             successor_node = QStarNode(
                 self.node_counter,
                 successor,
                 current_node,
-                evaluation,  # Save as score only the new evaluation which is based on the full history. TBD...
+                evaluation,
+                self.depth,
             )
             self.branches.append(successor_node)
             self.node_counter += 1
 
-            if self.is_goal_state(evaluation):
-                success = self.run_external_validation(successor_node.get_history())
-                self.backpropagate(successor_node, int(success))  # 1 if the solution is correct, 0 otherwise.
+            final_answer = self.extract_answer(successor)
+            if final_answer:
+                answer = final_answer
+                if self.solution is None:
+                    success = True  # If not solution provided, we set to success to True to just return the first answer.
+                else:
+                    success = grader.grade_answer(final_answer, self.solution)
+                    self.backpropagate(
+                        successor_node, int(success)
+                    )  # 1 if the solution is correct, 0 otherwise.
                 if success:
                     result = Result.SUCCEEDED
                     self.save_success_path(successor_node)
@@ -146,6 +163,10 @@ class QStarAlgorithm:
                     result = Result.FAILED
         # Sort branches by score
         self.sort_branches()
+        self.depth += 1
+
+        if answer is not None:
+            return answer, result
 
         return self.branches[0].get_history(), result
 
@@ -159,53 +180,57 @@ class QStarAlgorithm:
             task=self.task_description, history=history, n=self.new_branches
         )
 
-    def evaluate_state(self, history):
+    def evaluate_state(self, history, new_step):
         """
         Call the LLM evaluator to obtain the evaluation of a state.
         """
-        return generate_evaluation(task=self.task_description, history=history)
+        evaluation_str = generate_evaluation(
+            task=self.task_description, history=history, new_step=new_step
+        )
+        match = re.search(r"[-+]?\d*\.\d+|\d+", evaluation_str)
+        evaluation_float = float(match.group()) if match else None
+        return evaluation_float
 
-    def is_goal_state(self, evaluation: int):
-        """
-        Determine if the current state is a potential goal state.
-        """
-        # This method should determine if the current state represents a potential solution.
-        # TODO: How to determine if the current state is a potential solution? Potential ideas:
-        #       - 1: Ask the evaluator to return a value of -1
-        #       - 2: Ask the policy to provide both the next step and a flag with is_goal_state
-        return evaluation == -1
-
-    def backpropagate(self, node: QStarNode, reward: int):
+    def backpropagate(self, current_node: QStarNode, reward: int):
         """
         Backpropagate the reward to the parent nodes.
         """
-        node = self
-        while node:
+        path = current_node.get_path()
+        for node in path:
             node.update(reward, self.learning_rate)
             evaluation_input = fill_evaluation_training_data(
                 task=self.task_description,
-                history=node.get_history(exclude_current_state=True),
+                history=node.get_history(add_current_state=False),
                 new_step=node.state,
             )
-            self.updated_scores[node.id] = (evaluation_input, node.score)
+            self.updated_scores[node.uid] = (evaluation_input, node.score)
 
-            node = node.parent
-
-    def save_success_path(self, node: QStarNode):
+    def save_success_path(self, last_node: QStarNode):
         """
         Save the current path as solution.
         """
-        while node:
+        path = last_node.get_path()
+
+        for node in path:
             previous_history = node.get_history(add_current_state=False)
             policy_training_input = fill_policy_training_data(
                 task=self.task_description, history=previous_history
             )
-            self.solutions.append(policy_training_input, node.state)
+            self.solutions.append((policy_training_input, node.state))
 
-            node = node.parent
+    def extract_answer(self, text):
+        """
+        Extracts and returns the content after 'Answer: ' in the provided text.
+        If 'Answer: ' is not found, returns an empty string.
+        """
+        keyword = "Answer: "
+        start_index = text.find(keyword)
 
-    def run_external_validation(self, history: str):
-        """
-        Run an external validation to ensure that the solution is correct.
-        """
-        pass
+        if start_index == -1:
+            return None
+
+        # Extract content after the keyword
+        start_index += len(keyword)
+        answer = text[start_index:].strip()
+
+        return answer

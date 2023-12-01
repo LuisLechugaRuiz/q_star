@@ -1,4 +1,4 @@
-from utils.llm_call import load_prompt, get_response, fill_messages
+from q_star.utils.llm_call import load_prompt, get_response, fill_messages
 
 
 def fill_policy_prompt(task, history):
@@ -28,7 +28,7 @@ def generate_policy_steps(task, history, n=1):
     """
     system, user = fill_policy_prompt(task, history)
 
-    responses = get_response("gpt-4-turbo", system, user, n=n)
+    responses = get_response(system, user, n=n)
     steps = [response["message"]["content"] for response in responses["choices"]]
 
     return steps
