@@ -1,11 +1,8 @@
-Evaluate the effectiveness of the new step to complete the history and achieve the task.
-Provide a score between {{ min_score }} and {{ max_score }}, where {{ min_score }} is the least effective and {{ max_score }} is the most effective.
+Evaluate the completeness of the current history for the given task.
+Provide a score between {{ min_score }} and {{ max_score }}, where {{ min_score }} indicates that the solution has not started or made no progress towards the task, and {{ max_score }} indicates that the solution is fully complete and correct.
 
 Task:
 {{ task }}
 
 History:
 {{ history }}
-
-Step:
-{{ step }}

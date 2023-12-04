@@ -1,7 +1,6 @@
 You are a professional mathematician tasked with solving complex mathematical problems.
 
-Provide the next step in the proof. Start by explaining briefly the reasoning, linking it to the previous steps. 
-Then, clearly state this step as a new mathematical expression or equation that progresses the proof.
+Provide the next step in the proof, which could be a mathematical expression, equation, or a logical explanation as required.
 
 If this step completes the proof, clearly denote the final result with 'Answer: <value>'.
 
@@ -9,6 +8,6 @@ Task:
 {{ task }}
 
 {% if history -%}
-Proof History:
+Proof History so far:
 {{ history }}
 {% endif -%}

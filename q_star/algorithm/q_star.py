@@ -38,11 +38,7 @@ class QStarNode:
         self.state = state
         self.parent = parent
         self.score = score
-        self.accumulated_score = score + parent.accumulated_score if parent else score
         self.depth = depth
-
-    def get_score(self, depth_penalty):
-        return self.accumulated_score - depth_penalty * self.depth
 
     def get_path(self) -> List["QStarNode"]:
         """
@@ -66,15 +62,17 @@ class QStarNode:
             path.pop(-1)  # Remove the current state
 
         history = ""
-        for index, node in enumerate(path):
-            history += f"- {index}: {node.state}\n"
+        for node in path:
+            history += f"{node.state}\n"
         return history
 
     def update(self, new_score, learning_rate):
         """
         Simple update of the node score using the learning rate.
         """
+        print("DEBUG - Initial score: ", self.score)
         self.score = self.score + learning_rate * (new_score - self.score)
+        print("DEBUG - New score: ", new_score)
 
 
 class QStarAlgorithm:
@@ -89,7 +87,6 @@ class QStarAlgorithm:
         solution: Optional[str] = None,
         new_branches=2,
         learning_rate=0.1,
-        depth_penalty=0.05,
     ):
         """
         Initialize the Q* algorithm.
@@ -102,7 +99,6 @@ class QStarAlgorithm:
         self.solution = solution
         self.new_branches = new_branches
         self.learning_rate = learning_rate
-        self.depth_penalty = depth_penalty
 
         self.node_counter = 0
         self.depth = 0
@@ -117,7 +113,7 @@ class QStarAlgorithm:
         """
         Sort the branches by score, and in case of a tie, by depth.
         """
-        self.branches.sort(key=lambda n: (n.get_score(self.depth_penalty), n.depth), reverse=True)
+        self.branches.sort(key=lambda n: (n.score, n.depth), reverse=True)
 
     def run(self) -> (str, Result):
         """
@@ -129,10 +125,12 @@ class QStarAlgorithm:
         history = current_node.get_history()
         result = Result.IN_PROGRESS
         answer = None
+        self.depth += 1
 
         # Generate successors and evaluate them
         for successor in self.get_successors(history):
-            evaluation = self.evaluate_state(history, successor)
+            updated_history = history + successor + "\n"
+            evaluation = self.evaluate_state(updated_history)
             if evaluation is None:
                 evaluation = 0.0  # Error extracting evaluation from model response...
 
@@ -163,12 +161,11 @@ class QStarAlgorithm:
                     result = Result.FAILED
         # Sort branches by score
         self.sort_branches()
-        self.depth += 1
 
         if answer is not None:
-            return answer, result
+            return answer, result, self.branches[0].score, self.branches[0].depth
 
-        return self.branches[0].get_history(), result
+        return self.branches[0].get_history(), result, self.branches[0].score, self.branches[0].depth
 
     def get_successors(self, history):
         """
@@ -180,12 +177,12 @@ class QStarAlgorithm:
             task=self.task_description, history=history, n=self.new_branches
         )
 
-    def evaluate_state(self, history, new_step):
+    def evaluate_state(self, history):
         """
         Call the LLM evaluator to obtain the evaluation of a state.
         """
         evaluation_str = generate_evaluation(
-            task=self.task_description, history=history, new_step=new_step
+            task=self.task_description, history=history
         )
         match = re.search(r"[-+]?\d*\.\d+|\d+", evaluation_str)
         evaluation_float = float(match.group()) if match else None
@@ -195,13 +192,15 @@ class QStarAlgorithm:
         """
         Backpropagate the reward to the parent nodes.
         """
+        print(f"Backpropagating reward: {reward}")
         path = current_node.get_path()
+        path_length = current_node.depth
         for node in path:
-            node.update(reward, self.learning_rate)
+            new_score = reward / path_length * node.depth
+            node.update(new_score, self.learning_rate)
             evaluation_input = fill_evaluation_training_data(
                 task=self.task_description,
-                history=node.get_history(add_current_state=False),
-                new_step=node.state,
+                history=node.get_history(),
             )
             self.updated_scores[node.uid] = (evaluation_input, node.score)
 

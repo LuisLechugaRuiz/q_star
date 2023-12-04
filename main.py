@@ -20,16 +20,18 @@ def execute_q_star(q_star: QStarAlgorithm, training: bool, max_iterations: int):
     iterations = 0
 
     while iterations < max_iterations:  # TODO: Determine end condition.
-        history, result = q_star.run()
+        history, result, score, depth = q_star.run()
         if result == Result.IN_PROGRESS:
-            print_with_color("REASONING:\n", history, "blue")
+            print_with_color(f"REASONING with Q-Value: {score} and depth: {depth}:\n", history, "blue")
         elif result == Result.SUCCEEDED:
-            print_with_color("CORRECT SOLUTION:", history, "green")
+            print_with_color(
+                f"CORRECT SOLUTION with Q-Value: {score} and depth: {depth}:", history, "green"
+            )
             if not training:
                 # Just finish as we found the correct solution.
                 return None
         elif result == Result.FAILED:
-            print_with_color("WRONG SOLUTION:", history, "red")
+            print_with_color(f"WRONG SOLUTION with Q-Value: {score} and depth: {depth}:", history, "red")
         iterations += 1
 
 
@@ -51,9 +53,6 @@ def parse_arguments():
     )
     parser.add_argument(
         "--learning_rate", type=float, required=False, default=0.1, help="Learning rate"
-    )
-    parser.add_argument(
-        "--depth_penalty", type=float, required=False, default=0.05, help="Depth penalty"
     )
     parser.add_argument(
         "--training", action="store_true", help="Flag to indicate training mode"
@@ -85,7 +84,6 @@ def main():
         solution=args.solution,
         new_branches=args.new_branches,
         learning_rate=args.learning_rate,
-        depth_penalty=args.depth_penalty,
     )
     execute_q_star(q_star, args.training, args.iterations)
 
